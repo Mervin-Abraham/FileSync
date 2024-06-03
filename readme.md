@@ -1,6 +1,6 @@
 # FileSync
 
-FileSync is a Python script designed to synchronize files between two directories. It compares the files in the source directory with those in the destination directory and copies any missing files from the source to the destination.
+FileSync is a Python script designed to synchronize files between two directories. It compares the files in the source directory with those in the destination directory and copies any missing files from the source to the destination. The primary purpose of this script is to preserve the original creation and modification timestamps of files during the synchronization process. This ensures that the chronological order of files is maintained, which is personally preferred for backup purposes.
 
 ## Features
 
