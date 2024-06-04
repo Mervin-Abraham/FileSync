@@ -5,8 +5,7 @@ import platform
 import sys
 from tqdm import tqdm
 import logging
-from tkinter import filedialog
-from tkinter import Tk
+from tkinter import filedialog, Tk
 
 # Define paths
 LOG_DIR = 'logs'
@@ -25,7 +24,6 @@ main_logger.setLevel(logging.INFO)
 main_handler = logging.FileHandler(os.path.join(LOG_DIR, 'main_logger.log'))
 main_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 main_logger.addHandler(main_handler)
-
 
 
 def log_all_files_in_dir2(all_files_in_dir2):
@@ -66,10 +64,7 @@ def log_missing_files_from_checkpoint(checkpoint_files, all_files_in_dir2):
        # Ask user whether to create the missing files
         if len(missing_files_from_checkpoint) > 2:
             user_input = input(f"There are {len(missing_files_from_checkpoint)} files missing. Do you want to copy all of them? (y/n): ")
-            if user_input.lower() in ['yes', 'y']:
-                copy_all = True
-            else:
-                copy_all = False
+            copy_all = user_input.lower() in ['yes', 'y']
         else:
             copy_all = False
 
@@ -140,15 +135,10 @@ def copy_file_with_timestamp(src, dst):
                     os.makedirs(dst)
                 # Recursively copy the directory and its contents
                 for item in os.listdir(src):
-                    src_item = os.path.join(src, item)
-                    dst_item = os.path.join(dst, item)
-                    copy_file_with_timestamp(src_item, dst_item)
+                    copy_file_with_timestamp(os.path.join(src, item), os.path.join(dst, item))
             else:
-                # Create the parent directory if it doesn't exist
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
-                # Copy the file with timestamp preservation
                 shutil.copy2(src, dst)
-                # Preserve timestamps
                 if platform.system() == 'Windows':
                     os.utime(dst, (os.path.getatime(dst), os.path.getmtime(dst)))
                 else:
@@ -174,12 +164,10 @@ def select_directory(title):
         return directory_path
 
     # Otherwise, construct the absolute path based on the current working directory
-    print(os.path.abspath(directory_path))
     return os.path.abspath(directory_path)
 
-
 def main():
-    global directory_path1, directory_path2  # Declare global variables to modify them inside the function
+    global directory_path1, directory_path2
 
     main_logger.info("\n" + "\n" + "-"*40 + f" New Run: {RUN_ID} " + "-"*40 + "\n" + "\n")
     
@@ -188,10 +176,10 @@ def main():
     directory_path1 = select_directory("Select Source Directory")
     print("\nSelect the destination directory:")
     directory_path2 = select_directory("Select Destination Directory")
-    
+
     main_logger.info(f"Selected source paths: {directory_path1}")
     main_logger.info(f"Selected destination paths: {directory_path2}")
-    
+
     if directory_path1 == '' or directory_path2 == '':
         print("\nSource and destination cannot be pointed to the root of the program")
         main_logger.info("Source and destination cannot be pointed to the root of the program")
@@ -203,6 +191,7 @@ def main():
     
     user_input = input(f"\nWrite 'Confirm' or 'c': ")
     print("\n\n")
+
     if user_input.lower() in ['confirm', 'c']:        
         # Load the checkpoint to determine the progress
         checkpoint_files = load_checkpoint()
@@ -218,13 +207,13 @@ def main():
                 with tqdm(total=len(missing_files)) as pbar:
                     for file in missing_files:
                         main_logger.info(f"Current File: {file}")
-                        pbar.update(1)
                         pbar.set_description(f"Copying {file}")
                         src_file = os.path.join(directory_path1, file)
                         dst_file = os.path.join(directory_path2, file)
                         copy_file_with_timestamp(src_file, dst_file)
                         files_processed.append(file)
                         save_checkpoint(files_processed)
+                        pbar.update(1)
                 main_logger.info("All files copied successfully!")
             
             # Log all the files in directory2 to a separate log file
@@ -253,4 +242,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
