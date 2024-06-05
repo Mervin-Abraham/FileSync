@@ -1,0 +1,65 @@
+2024-06-06 02:39:40,198 - INFO - 
+
+---------------------------------------- New Run: 06 June 2024 - 02:39:40 ----------------------------------------
+
+
+2024-06-06 02:40:00,818 - INFO - Selected source paths: /sdcard/Pictures/Testing/
+2024-06-06 02:40:00,818 - INFO - Selected destination paths: E:/Work Transfer/Python/FileSync/Path-1
+2024-06-06 02:40:05,285 - INFO - 4 file(s) missing from directory 2
+2024-06-06 02:40:05,285 - INFO - Copying missing files to directory 2:
+2024-06-06 02:40:05,715 - INFO - All files copied successfully!
+2024-06-06 02:52:01,986 - INFO - 
+
+---------------------------------------- New Run: 06 June 2024 - 02:52:01 ----------------------------------------
+
+
+2024-06-06 03:06:56,018 - INFO - 
+
+---------------------------------------- New Run: 06 June 2024 - 03:06:56 ----------------------------------------
+
+
+2024-06-06 03:08:28,072 - INFO - 
+
+---------------------------------------- New Run: 06 June 2024 - 03:08:28 ----------------------------------------
+
+
+2024-06-06 03:11:47,194 - INFO - 
+
+---------------------------------------- New Run: 06 June 2024 - 03:11:47 ----------------------------------------
+
+
+2024-06-06 03:12:47,471 - INFO - 
+
+---------------------------------------- New Run: 06 June 2024 - 03:12:47 ----------------------------------------
+
+
+2024-06-06 03:24:05,801 - INFO - 
+
+---------------------------------------- New Run: 06 June 2024 - 03:24:05 ----------------------------------------
+
+
+2024-06-06 03:28:46,541 - INFO - 
+
+---------------------------------------- New Run: 06 June 2024 - 03:28:46 ----------------------------------------
+
+
+2024-06-06 03:29:19,851 - INFO - Selected source paths: /sdcard/Pictures/Testing/
+2024-06-06 03:29:19,851 - INFO - Selected destination paths: E:/Work Transfer/Python/FileSync/Path-1
+2024-06-06 03:29:21,895 - INFO - 4 file(s) missing from directory 2
+2024-06-06 03:29:21,895 - INFO - Copying missing files to directory 2:
+2024-06-06 03:29:22,012 - ERROR - An error occurred: name 'selected_device_id' is not defined
+2024-06-06 03:29:22,013 - INFO - 
+Operation interrupted by the user.
+2024-06-06 03:30:27,038 - INFO - 
+
+---------------------------------------- New Run: 06 June 2024 - 03:30:27 ----------------------------------------
+
+
+2024-06-06 03:30:48,929 - INFO - Selected source paths: /sdcard/Pictures/Testing/
+2024-06-06 03:30:48,929 - INFO - Selected destination paths: E:/Work Transfer/Python/FileSync/Path-1
+2024-06-06 03:31:00,136 - INFO - 4 file(s) missing from directory 2
+2024-06-06 03:31:00,136 - INFO - Copying missing files to directory 2:
+2024-06-06 03:31:00,324 - INFO - Copied /sdcard/Pictures/Testing/3840-2400-202308-1.jpg to E:\Work Transfer\Python\FileSync\Path-1\3840-2400-202308-1.jpg
+2024-06-06 03:31:00,418 - INFO - Copied /sdcard/Pictures/Testing/Test/hehe.txt to E:\Work Transfer\Python\FileSync\Path-1\Test\hehe.txt
+2024-06-06 03:31:00,535 - INFO - Copied /sdcard/Pictures/Testing/Test/wallpaper_16568973612ad43093dd4a14b5509890acf9be29cc.jpeg to E:\Work Transfer\Python\FileSync\Path-1\Test\wallpaper_16568973612ad43093dd4a14b5509890acf9be29cc.jpeg
+2024-06-06 03:31:00,535 - INFO - All files copied successfully!
