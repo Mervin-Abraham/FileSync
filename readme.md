@@ -44,13 +44,3 @@ Contributions are welcome! Feel free to fork the repository and submit pull requ
 ## Credits
 
 FileSync is developed by Mervin Abraham (https://github.com/Mervin-Abraham).
-
-Tasks
-
-[x] I have two file dictionary paths and I have around 7000 files in one directory  and the other directory has about 4000 files.
-[x] Both the directories contains the same file and file name. 
-[x] I am trying to find out from directory path 1, which are the files missing in directory path 2.
-[x] All files have unique names. 
-[x] Copy the missing files from directory 1 and put into directory 2 but by copying it, it should not modify the original file's created time. 
-    This is mandatory that the created time does not get changed. 
-[x] Shows the current file being copied, progress bar, ETA, number of files left to copy
