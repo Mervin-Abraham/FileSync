@@ -9,6 +9,12 @@ FileSync is a Python script designed to synchronize files between two directorie
 - Ability to resume from the last checkpoint in case of interruption.
 - User-friendly interface using Tkinter for selecting source and destination directories.
 - Progress tracking using tqdm for copying files.
+- **Support for handling files and directories on MTP (Media Transfer Protocol) devices**:
+  - Enables users to select MTP devices as both source and destination directories.
+  - Implements directory traversal and file operations on MTP devices using the subprocess module.
+  - Integrates permission management for accessing and modifying files on MTP devices.
+  - Facilitates copying files between local directories and MTP devices, as well as between MTP devices.
+  - Ensures accurate handling of file timestamps during copying operations.
 
 ## Usage
 
@@ -27,6 +33,12 @@ FileSync is a Python script designed to synchronize files between two directorie
 - The script uses the `logs` directory to store log files. Make sure this directory exists in the same directory as the script.
 - You can customize the log file names and formats by modifying the `main_logger` and other logger configurations in the script.
 - Adjust the paths of the source and destination directories according to your requirements by modifying the `directory_path1` and `directory_path2` variables in the script.
+
+## Implementation Details for MTP Support
+
+- Utilizes ADB (Android Debug Bridge) commands to interact with connected Android devices in MTP mode.
+- Implements directory listing, file copying, and permission management functionalities for MTP devices.
+- Incorporates error handling mechanisms to gracefully manage exceptions during MTP operations.
 
 ## Logging
 
