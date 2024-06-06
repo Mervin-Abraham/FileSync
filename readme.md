@@ -47,7 +47,7 @@ FileSync is developed by Mervin Abraham (https://github.com/Mervin-Abraham).
 
 Tasks
 
-[x] I have two file dictionary paths and I have around 7000 files in one directory  and the other directory has about 4000 files. 
+[x] I have two file dictionary paths and I have around 7000 files in one directory  and the other directory has about 4000 files.
 [x] Both the directories contains the same file and file name. 
 [x] I am trying to find out from directory path 1, which are the files missing in directory path 2.
 [x] All files have unique names. 
