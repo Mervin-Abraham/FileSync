@@ -23,4 +23,4 @@ jobs:
                          *Triggered by:* ${{ github.actor }} \n
                          *Run details:* [View Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})"
               }' \
-          "${{secrets.GOOGLE_CHAT_WEBHOOK_URL }}"
+          "${{ secrets.GOOGLE_CHAT_WEBHOOK }}"
