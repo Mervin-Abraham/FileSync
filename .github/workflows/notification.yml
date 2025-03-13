@@ -1,8 +1,8 @@
 name: Notify Google Chat on Action Run
 
 on:
-  push
-  pull_request
+  push:
+  pull_request:
   workflow_run:
     workflows: ["CodeQL"]
     types:
@@ -17,10 +17,10 @@ jobs:
           curl -X POST -H "Content-Type: application/json" \
           -d '{
                 "text": "🚀 GitHub Action executed in *Mervin-Abraham/FileSync* \n
-                         *Event:* ${{ github.event_name }} \n
-                         *Status:* ${{ job.status }} \n
+                         *Event:* '${{ github.event_name }}' \n
+                         *Status:* '${{ job.status }}' \n
                          *Commit:* `${{ github.sha }}` \n
-                         *Triggered by:* ${{ github.actor }} \n
+                         *Triggered by:* '${{ github.actor }}' \n
                          *Run details:* [View Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})"
               }' \
-          "YOUR_GOOGLE_CHAT_WEBHOOK_URL"
+          "https://chat.googleapis.com/v1/spaces/AAAARyEYIZk/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=JcAZzbcRHH5LhN8GMvbvZJJIFRkieP6909Fwat_x8KM"
