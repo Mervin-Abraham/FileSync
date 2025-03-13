@@ -1,8 +1,8 @@
 name: Notify Google Chat on Action Run
 
 on:
-  push
-  pull_request
+  push:
+  pull_request:
   workflow_run:
     workflows: ["CodeQL"]
     types:
@@ -23,4 +23,4 @@ jobs:
                          *Triggered by:* ${{ github.actor }} \n
                          *Run details:* [View Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})"
               }' \
-          "YOUR_GOOGLE_CHAT_WEBHOOK_URL"
+          "GOOGLE_CHAT_WEBHOOK_URL"
