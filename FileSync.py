@@ -1,420 +1,638 @@
-from datetime import datetime
-import os
-import shutil
-import platform
-import time
-from tqdm import tqdm
+from __future__ import annotations
+
 import logging
-from tkinter import filedialog, Tk
+import os
 import subprocess
-import win32file
-import pywintypes
+from datetime import datetime
+from tkinter import Tk, filedialog
 
-LOG_DIR = 'logs'
-if not os.path.exists(LOG_DIR):
-    os.makedirs(LOG_DIR)
+from filesync.adb import build_shell_command, parse_devices, resolve_adb_path, run_shell
+from filesync.copy import Endpoint, dest_prefix_for, source_job_stats, sync_directories
+from filesync.manifest import load_manifest
+from filesync.paths import is_ignored, join_mtp_path, join_relpath, parent_mtp_path, prune_ignore_prefixes
+from filesync.sizes import local_tree_size, parse_du_sk
+from filesync import ui
 
-CHECKPOINT_FILE = os.path.join(LOG_DIR, 'checkpoint.txt')
+LOG_DIR = "logs"
+MTP_ROOT = "/sdcard/"
 
-RUN_ID = datetime.now().strftime('%d %B %Y - %H:%M:%S')
 
-main_logger = logging.getLogger('main')
-main_logger.setLevel(logging.INFO)
-main_handler = logging.FileHandler(os.path.join(LOG_DIR, 'main_logger.log'))
-main_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-main_logger.addHandler(main_handler)
+def parse_kind(text: str) -> str:
+    """Parse a source/dest kind answer into 'mtp' or 'local'."""
+    kind = text.strip().lower()
+    if kind not in ("mtp", "local"):
+        raise ValueError(f"Invalid kind: {text!r}. Expected 'mtp' or 'local'.")
+    return kind
 
-# Paste the path to adb.exe here
-adb_path = r"C:\Users\platform-tools-latest-windows\platform-tools\adb.exe"
 
-def log_all_files_in_dir2(all_files_in_dir2):
+def select_device(devices: list[tuple[str, str | None]], choose) -> str | None:
+    """Return a device serial, or None if the user goes back.
+
+    Auto-selects when there is exactly one device.
     """
-    Log all the files in directory2 to a separate log file.
-    """
-    if all_files_in_dir2:
-        logger2 = logging.getLogger('AllFilesInDirectory2')
-        logger2.setLevel(logging.INFO)
-        file_handler2 = logging.FileHandler(os.path.join(LOG_DIR, 'all_files_in_directory2.log'))
-        file_handler2.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-        logger2.addHandler(file_handler2)
-        
-        logger2.info("\n" + "\n" + "-"*40 + f" New Run: {RUN_ID} " + "-"*40 + "\n" + "\n")
-    
-        logger2.info(f"Number of files found in directory 2: {len(all_files_in_dir2)}")
-        for file_path in all_files_in_dir2:
-            logger2.info(file_path)
+    if len(devices) == 1:
+        serial, model = devices[0]
+        label = f"{serial} - {model}" if model else serial
+        ui.success(f"Using device: {label}")
+        return serial
 
-def log_missing_files_from_checkpoint(checkpoint_files, all_files_in_dir2):
-    """
-    Log files that are in the checkpoint log but not found in directory 2.
-    """
-    missing_files_from_checkpoint = [file for file in checkpoint_files if file not in all_files_in_dir2]
-    if missing_files_from_checkpoint:
-        logger3 = logging.getLogger('MissingFilesFromCheckpoint')
-        logger3.setLevel(logging.INFO)
-        file_handler3 = logging.FileHandler(os.path.join(LOG_DIR, 'missing_files_from_checkpoint.log'))
-        file_handler3.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-        logger3.addHandler(file_handler3)
-        
-        logger3.info("\n" + "\n" + "-"*40 + f" New Run: {RUN_ID} " + "-"*40 + "\n" + "\n")
-        
-        logger3.info(f"{len(missing_files_from_checkpoint)} file(s) present in the checkpoint")
-        for file_path in missing_files_from_checkpoint:
-            logger3.info(file_path)
-        
-        if len(missing_files_from_checkpoint) > 2:
-            user_input = input(f"There are {len(missing_files_from_checkpoint)} files missing. Do you want to copy all of them? (y/n): ")
-            copy_all = user_input.lower() in ['yes', 'y']
-        else:
-            copy_all = False
+    options = [
+        (str(index), f"{serial} - {model}" if model else serial)
+        for index, (serial, model) in enumerate(devices, 1)
+    ]
+    options.append(("b", "Back"))
+    ui.menu("Available devices", options)
+    while True:
+        answer = choose("Choice: ").strip()
+        if answer.lower() == "b":
+            return None
+        if answer.isdigit():
+            index = int(answer)
+            if 1 <= index <= len(devices):
+                return devices[index - 1][0]
+        ui.warn("Enter a number from the list, or b to go back.")
 
-        for file_path in missing_files_from_checkpoint:
-            if not copy_all:
-                user_input = input(f"Do you want to copy the missing file {file_path}? (y/n): ")
-                if user_input.lower() not in ['yes', 'y']:
-                    main_logger.info(f"File copy skipped for {file_path}")
-                    continue
-            src_file = os.path.join(directory_path1, file_path)
-            dst_file = os.path.join(directory_path2, file_path)
-            copy_file_with_timestamp(src_file, dst_file)
-            main_logger.info(f"Copied file: {file_path}")
 
-def save_checkpoint(files_processed):
-    """
-    Save the current progress (list of processed files) to the checkpoint file.
-    """
-    with open(CHECKPOINT_FILE, 'w') as f:
-        for file in files_processed:
-            f.write(file + '\n')
-
-def load_checkpoint():
-    """
-    Load the list of processed files from the checkpoint file.
-    """
-    files_processed = []
-    if os.path.exists(CHECKPOINT_FILE):
-        with open(CHECKPOINT_FILE, 'r') as f:
-            files_processed = [line.strip() for line in f.readlines()]
-    return files_processed
-
-# If permission needed you can force permit the entry point.
-def grant_permissions_via_adb(directory_path, selected_device_id):
-    try:
-        subprocess.run([adb_path, '-s', selected_device_id,  'root'], check=True)  # Ensure the device is in root mode or ADB debugging as True
-        subprocess.run([adb_path, '-s', selected_device_id,  'shell', 'chmod', '-R', '777', directory_path], check=True)
-        print("Permissions granted successfully.")
-    except subprocess.CalledProcessError as e:
-        print(f"Error occurred while granting permissions: {e}")
-
-def find_missing_files_and_all_files(dir1, dir2, selected_device_id, dir1_is_mtp=False, dir2_is_mtp=False):
-    """
-    This function returns a tuple containing:
-    1. A list of files and folders that are in dir1 but not in dir2.
-    2. A list of all files and folders in dir2.
-    3. Find missing files and folders in dir2 compared to dir1
-    """
-    def list_files_mtp(directory):
-        try:
-            output = subprocess.check_output([adb_path, '-s', selected_device_id,  'shell', 'ls', '-R', directory]).decode()
-            
-            file_paths = []
-            current_dir = directory
-            for line in output.splitlines():
-                if line.endswith(':'):
-                    current_dir = line[:-1]
-                elif line:
-                    file_paths.append(os.path.join(current_dir, line))
-            return file_paths
-        except subprocess.CalledProcessError as e:
-            main_logger.error(f"Error listing MTP files: {e}")
-            return []
-
-    def list_files_local(directory):
-        file_paths = []
-        for root, dirs, files in os.walk(directory):
-            for file in files:
-                file_paths.append(os.path.relpath(os.path.join(root, file), directory))
-        return file_paths
-
-    files_in_dir1 = list_files_mtp(dir1) if dir1_is_mtp else list_files_local(dir1)
-    files_in_dir2 = list_files_mtp(dir2) if dir2_is_mtp else list_files_local(dir2)
-
-    missing_files = set(files_in_dir1) - set(files_in_dir2)
-
-    return list(missing_files), files_in_dir2
-
-def copy_file_with_timestamp(src, dst):
-    """
-    This function copies a file or directory from src to dst without modifying its created time.
-    """
-    try:
-        if os.path.exists(src):
-            # Check if source is a directory
-            if os.path.isdir(src):
-                # Create the destination directory if it doesn't exist
-                if not os.path.exists(dst):
-                    os.makedirs(dst)
-                # Recursively copy the directory and its contents
-                for item in os.listdir(src):
-                    copy_file_with_timestamp(os.path.join(src, item), os.path.join(dst, item))
-            else:
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                shutil.copy2(src, dst)
-                if platform.system() == 'Windows':
-                    os.utime(dst, (os.path.getatime(dst), os.path.getmtime(dst)))
-                else:
-                    shutil.copystat(src, dst)
-        else:
-            main_logger.error(f"Source '{src}' not found.")
-    except Exception as e:
-        main_logger.error(f"Error occurred while copying {src}: {e}")
-        # Remove the partially copied file if an error occurs during copying
-        if os.path.exists(dst):
-            os.remove(dst)
-
-def file_exists_on_phone(phone_file_path, selected_device_id):
-    try:
-        result = subprocess.run([adb_path, '-s', selected_device_id,  'shell', 'ls', phone_file_path], capture_output=True, text=True)
-        return 'No such file or directory' not in result.stderr
-    except subprocess.CalledProcessError as e:
-        main_logger.error(f"Error checking file existence on phone: {e}")
-        return False
-
-def copy_files_to_phone(local_folder, phone_directory, selected_device_id):
-    for root, dirs, files in os.walk(local_folder):
-        relative_path = os.path.relpath(root, local_folder)
-        phone_path = os.path.join(phone_directory, relative_path).replace('\\', '/')
-
-        for file in files:
-            local_file = os.path.join(root, file)
-            phone_file = os.path.join(phone_path, file).replace('\\', '/')
-            if not file_exists_on_phone(phone_file, selected_device_id):
-                try:
-                    subprocess.run([adb_path, '-s', selected_device_id,  'push', '-p', local_file, phone_file], check=True)
-                    main_logger.info(f"Copied {local_file} to {phone_file}")
-                except subprocess.CalledProcessError as e:
-                    main_logger.error(f"Error copying {local_file} to {phone_file}: {e}")
-            else:
-                main_logger.info(f"File {phone_file} already exists on the phone. Skipping copy.")
-
-# Might break as this is configured for my own purpose``
-def get_file_times(phone_file, selected_device_id):
-    try:
-        result = subprocess.check_output([adb_path, '-s', selected_device_id,  'shell', 'ls', '-l', phone_file]).decode().strip()
-        parts = result.split()
-        if len(parts) < 8:
-            raise ValueError("Unexpected output from ls command")
-        modify_time_str = parts[5] + " " + parts[6]
-        modify_time = int(time.mktime(datetime.strptime(modify_time_str, "%Y-%m-%d %H:%M").timetuple()))
-        return modify_time
-    except (subprocess.CalledProcessError, ValueError) as e:
-        main_logger.error(f"Error getting file times for {phone_file}: {e}")
-        return None
-
-def copy_files_to_local(phone_directory, local_folder, selected_device_id):
-    try:
-        phone_files = subprocess.check_output([adb_path, '-s', selected_device_id,  'shell', 'find', phone_directory, '-type', 'f']).decode().splitlines()
-        for phone_file in phone_files:
-            relative_path = os.path.relpath(phone_file, phone_directory)
-            local_file = os.path.join(local_folder, relative_path).replace('/', os.sep)
-            local_file_dir = os.path.dirname(local_file)
-            if not os.path.exists(local_file_dir):
-                os.makedirs(local_file_dir)
-            
-            if not os.path.exists(local_file):
-                try:
-                    subprocess.run([adb_path, '-s', selected_device_id,  'pull', phone_file, local_file], check=True)
-                    modify_time = get_file_times(phone_file, selected_device_id)
-                    if modify_time:
-                        current_time = pywintypes.Time(modify_time)  # Convert to pywintypes.Time
-                        file_handle = win32file.CreateFile(local_file, win32file.GENERIC_WRITE, 0, None, win32file.OPEN_EXISTING, 0, 0)
-                        win32file.SetFileTime(file_handle, CreationTime=current_time, LastAccessTime=current_time, LastWriteTime=current_time)
-                        win32file.CloseHandle(file_handle)
-                    main_logger.info(f"Copied {phone_file} to {local_file}")
-                except subprocess.CalledProcessError as e:
-                    main_logger.error(f"Error copying {phone_file} to {local_file}: {e}")
-            else:
-                main_logger.info(f"File {local_file} already exists locally. Skipping copy.")
-    except subprocess.CalledProcessError as e:
-        main_logger.error(f"Error retrieving files from phone: {e}")
-
-def select_directory(title):
-    """
-    Opens a file dialog to select a directory and returns the path.
-    """
+def select_local_directory(title: str) -> str:
     root = Tk()
     root.withdraw()
-    directory_path = filedialog.askdirectory(title=title)
-
-    if os.path.isabs(directory_path):
-        return directory_path
-
-    return os.path.abspath(directory_path)
-
-def list_phone_directories(selected_device_id, current_path="/sdcard/"):
     try:
-        root_contents = subprocess.check_output([adb_path, '-s', selected_device_id,  '-s', selected_device_id, 'shell', 'ls', current_path]).decode().splitlines()
-        print(f"Available directories in {current_path}:")
-        for directory in root_contents:
-            print(directory)
-        return root_contents
-    except subprocess.CalledProcessError as e:
-        main_logger.error(f"Error listing phone directories: {e}")
-        return None
+        path = filedialog.askdirectory(title=title)
+    finally:
+        root.destroy()
+    if not path:
+        return ""
+    return path if os.path.isabs(path) else os.path.abspath(path)
 
-def traverse_mtp_directories(selected_device_id, current_path="/sdcard/"):
+
+def prompt_local_directory(label: str, ask=ui.ask, browse=select_local_directory) -> str | None:
     while True:
-        directories = list_phone_directories(selected_device_id, current_path)
-        if directories is None:
-            break
-        
-        user_input = input("Enter directory to traverse, '..' to go back, or 'select' to choose this directory: ")
-        if user_input == 'select':
-            return current_path
-        elif user_input == '..':
-            if current_path == "/sdcard/":
-                print("Already at root directory. Can't go back further.")
-            else:
-                current_path = os.path.dirname(current_path.rstrip('/')) + '/'
-        elif user_input in directories:
-            current_path = os.path.join(current_path, user_input).replace('\\', '/') + '/'
-        else:
-            print("Invalid input. Please try again.")
-
-def check_adb_devices():
-    try:
-        result = subprocess.check_output([adb_path, 'devices', '-l']).decode().strip().splitlines()[1:]
-        devices = {}
-        print("Available devices:")
-        for index, line in enumerate(result, 1):
-            parts = line.split()
-            device_id = parts[0]
-            model_name = next((part.split(':')[-1] for part in parts if part.startswith('model')), None)
-            if model_name:
-                print(f"{index}. {device_id} - {model_name}")
-                devices[index] = device_id
-            else:
-                print(f"{index}. {device_id}")
-        return devices
-    except subprocess.CalledProcessError as e:
-        main_logger.error(f"Error listing connected devices: {e}")
-        return {}
-
-def select_device(devices):
-    while True:
-        choice = input("Select a device by entering its number: ")
-        if choice.isdigit():
-            choice = int(choice)
-            if choice in devices:
-                return devices[choice]
-            else:
-                print("Invalid device number. Please try again.")
-        else:
-            print("Invalid input. Please enter a number.")
-
-def main():
-    global directory_path1, directory_path2
-
-    main_logger.info("\n" + "\n" + "-"*40 + f" New Run: {RUN_ID} " + "-"*40 + "\n" + "\n")
-    
-    while True:
-        print("Select the source directory:")
-        source_choice = input("Type 'mtp' to select an MTP device or 'local' to select a local directory: ").strip().lower()
-        if source_choice == 'mtp':
-            devices = check_adb_devices()
-            selected_device_id = select_device(devices)
-            print(f"Selected device: {selected_device_id}")
-            if not devices:
-                print("No devices found. Please connect a device and try again.")
-                continue
-            directory_path1 = traverse_mtp_directories(selected_device_id)
-            # grant_permissions_via_adb(directory_path1)
-            src_is_mtp = True
-        else:
-            directory_path1 = select_directory("Select Source Directory")
-            src_is_mtp = False
-            
-        print("Selected source directory: ", directory_path1)
-
-        print("\nSelect the destination directory:")
-        dest_choice = input("Type 'mtp' to select an MTP device or 'local' to select a local directory: ").strip().lower()
-        if dest_choice == 'mtp':
-            directory_path2 = traverse_mtp_directories(selected_device_id)
-            # grant_permissions_via_adb(directory_path2)
-            dst_is_mtp = True
-        else:
-            directory_path2 = select_directory("Select Destination Directory")
-            dst_is_mtp = False
-        
-        print("Selected destination directory: ", directory_path2)
-
-        main_logger.info(f"Selected source paths: {directory_path1}")
-        main_logger.info(f"Selected destination paths: {directory_path2}")
-
-        if not directory_path1 or not directory_path2 or directory_path1 == directory_path2:
-            print("\nInvalid directories selected, please try again")
-            main_logger.info("Invalid directories selected")
+        ui.menu(f"{label} folder", [("1", "Browse…"), ("2", "Type a path"), ("b", "Back")])
+        choice = ask("Choice: ").strip()
+        if choice.lower() == "b":
+            return None
+        if choice == "1":
+            return browse(f"Select {label} directory")
+        if choice == "2":
+            typed = ask("Path: ").strip().strip('"')
+            if os.path.isdir(typed):
+                return os.path.abspath(typed)
+            ui.warn("That path is not a folder.")
             continue
+        ui.warn("Enter 1, 2, or b.")
 
-        user_input = input(f"\nWrite 'Confirm' or 'c': ")
-        print("\n")
 
-        if user_input.lower() in ['confirm', 'c']:
-            checkpoint_files = load_checkpoint()
-            files_processed = list(checkpoint_files)
-            missing_files, all_files_in_dir2 = find_missing_files_and_all_files(directory_path1, directory_path2, selected_device_id, src_is_mtp, dst_is_mtp)
-            missing_files = [file for file in missing_files if file not in files_processed]
+def parse_ls_entries(output: str) -> tuple[list[str], int]:
+    """Split `ls -1ap` output into directory names and a file count.
 
-            main_logger.info(f"{len(missing_files)} file(s) missing from directory 2")
-
-            try:
-                if missing_files:
-                    main_logger.info("Copying missing files to directory 2:")
-                    if not src_is_mtp and dst_is_mtp:
-                        copy_files_to_phone(directory_path1, directory_path2, selected_device_id)
-                    elif src_is_mtp and not dst_is_mtp:
-                        copy_files_to_local(directory_path1, directory_path2, selected_device_id)
-                    elif not src_is_mtp and not dst_is_mtp:
-                        with tqdm(total=len(missing_files)) as pbar:
-                            for file in missing_files:
-                                main_logger.info(f"Current File: {file}")
-                                pbar.set_description(f"Copying {file}")
-                                src_file = os.path.join(directory_path1, file)
-                                dst_file = os.path.join(directory_path2, file)
-                                copy_file_with_timestamp(src_file, dst_file)
-                                files_processed.append(file)
-                                save_checkpoint(files_processed)
-                                pbar.update(1)
-
-                        # Log all the files in directory2 to a separate log file
-                        log_all_files_in_dir2(all_files_in_dir2)
-                        
-                        # Log missing files from the checkpoint log
-                        log_missing_files_from_checkpoint(checkpoint_files, all_files_in_dir2)
-                    main_logger.info("All files copied successfully!")
-
-            except Exception as e:
-                main_logger.error(f"An error occurred: {e}")
-                try:
-                    main_logger.info("\nOperation interrupted by the user.")
-                    main_logger.info(f"Removing {dst_file} as it was being processed.")
-                    if os.path.exists(dst_file):
-                        os.remove(dst_file)
-                    # Remove the interrupted file from the progress list and save the updated checkpoint
-                    files_processed.remove(file)
-                    save_checkpoint(files_processed)
-                    main_logger.info(f"{dst_file} File removed.")
-                    main_logger.info("Operation aborted.")
-                except PermissionError:
-                    main_logger.error(f"Permission denied to remove file: {dst_file}")
-                except FileNotFoundError:
-                    main_logger.error(f"File not found: {dst_file}")
+    Includes hidden names (`.thumbnails`, …). Skips `.` and `..`.
+    """
+    dirs: list[str] = []
+    files = 0
+    for line in output.splitlines():
+        entry = line.strip()
+        if not entry or entry in (".", "..", "./", "../"):
+            continue
+        if entry.endswith("/"):
+            name = entry.rstrip("/")
+            if name:
+                dirs.append(name)
         else:
-            print("\nInvalid input. Please confirm to start copying files.")
+            files += 1
+    return dirs, files
 
-        restart = input("Do you want to start again? (yes/no): ").strip().lower()
-        if restart != 'yes':
+
+def _mtp_listing(adb: str, serial: str, current_path: str) -> tuple[list[str], int] | None:
+    tries = (("-1ap",), ("-1a",), ("-1p",), ("-1",), ("-a",))
+    result = None
+    for flags in tries:
+        result = run_shell(adb, serial, build_shell_command("ls", *flags, current_path))
+        if result.returncode == 0:
             break
+    if result is None or result.returncode != 0:
+        ui.error(result.stderr.strip() if result and result.stderr else f"Failed to list {current_path}")
+        return None
+    stdout = result.stdout or ""
+    raw_lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+    has_dir_marks = any(line.endswith("/") for line in raw_lines)
+    dirs, files = parse_ls_entries(stdout)
+    if raw_lines and not has_dir_marks:
+        dirs = [
+            line.rstrip("/")
+            for line in raw_lines
+            if line not in (".", "..", "./", "../")
+        ]
+        files = 0
+    return dirs, files
+
+
+_mtp_size_cache: dict[tuple[str, str], dict[str, int]] = {}
+
+
+def _mtp_folder_sizes(adb: str, serial: str, folder: str) -> dict[str, int]:
+    """One-level tree sizes from `du -d 1 -sk`. Cached so going back is cheap.
+
+    Do not fall back to `du -sk` on the same folder: that walks the whole
+    tree again for a single total, which is why `/sdcard/` felt frozen.
+    """
+    if not folder:
+        return {}
+    cache_key = (serial, folder.rstrip("/") or folder)
+    cached = _mtp_size_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    result = run_shell(adb, serial, build_shell_command("du", "-d", "1", "-sk", folder))
+    sizes = parse_du_sk(result.stdout or "") if result.returncode == 0 else {}
+    _mtp_size_cache[cache_key] = sizes
+    return sizes
+
+
+def child_folder_sizes(source: Endpoint, rel: str, names: list[str], adb: str | None) -> dict[str, int]:
+    if not names:
+        return {}
+    if source.kind == "local":
+        base = os.path.join(source.path, *rel.split("/")) if rel else source.path
+        return {name: local_tree_size(os.path.join(base, name)) for name in names}
+    folder = join_mtp_path(source.path, rel) if rel else source.path
+    if folder.rstrip("/") == "/sdcard":
+        return {}
+    raw = _mtp_folder_sizes(adb or "", source.device or "", folder)
+    mapped: dict[str, int] = {}
+    for name in names:
+        key = join_mtp_path(folder, name).rstrip("/")
+        if key in raw:
+            mapped[name] = raw[key]
+    return mapped
+
+
+def list_phone_directories(adb: str, serial: str, current_path: str) -> list[str] | None:
+    listing = _mtp_listing(adb, serial, current_path)
+    if listing is None:
+        return None
+    dirs, files = listing
+    at_root = current_path.rstrip("/") == MTP_ROOT.rstrip("/")
+    ui.folder_listing(current_path, dirs, files, at_root=at_root)
+    return dirs
+
+
+def traverse_mtp_directories(
+    adb: str,
+    serial: str,
+    current_path: str = MTP_ROOT,
+    ask=ui.ask,
+) -> str | None:
+    """Walk phone folders. `b` goes up; at `/sdcard/` it returns None (back)."""
+    if not current_path:
+        current_path = MTP_ROOT
+    while True:
+        directories = list_phone_directories(adb, serial, current_path)
+        if directories is None:
+            if current_path.rstrip("/") != MTP_ROOT.rstrip("/"):
+                current_path = MTP_ROOT
+                continue
+            return None
+
+        choice = ask("Choice: ").strip()
+        lowered = choice.lower()
+        if lowered in ("0", "select"):
+            return current_path
+        if lowered in ("b", ".."):
+            parent = parent_mtp_path(current_path, MTP_ROOT)
+            if parent == current_path or current_path.rstrip("/") == MTP_ROOT.rstrip("/"):
+                return None
+            current_path = parent
+            continue
+        if choice.startswith("/"):
+            current_path = join_mtp_path("/", choice.lstrip("/"))
+            continue
+        if choice.isdigit():
+            index = int(choice)
+            if 1 <= index <= len(directories):
+                current_path = join_mtp_path(current_path, directories[index - 1])
+                continue
+        if choice in directories:
+            current_path = join_mtp_path(current_path, choice)
+            continue
+        ui.warn("Enter 0 to use this folder, b to go back, or a folder number.")
+
+
+def run_once(
+    source: Endpoint,
+    dest: Endpoint,
+    adb: str | None,
+    dest_prefix: str = "",
+    ignore_prefixes: list[str] | tuple[str, ...] = (),
+    planned: dict | None = None,
+) -> dict:
+    os.makedirs(LOG_DIR, exist_ok=True)
+    logger = logging.getLogger("main")
+    if not logger.handlers:
+        logger.setLevel(logging.INFO)
+        handler = logging.FileHandler(os.path.join(LOG_DIR, "main_logger.log"), encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+        logger.addHandler(handler)
+    return sync_directories(
+        source,
+        dest,
+        adb=adb,
+        logger=logger,
+        dest_prefix=dest_prefix,
+        ignore_prefixes=ignore_prefixes,
+        planned=planned,
+    )
+
+
+def _prompt_mtp_endpoint(start_path: str = MTP_ROOT) -> tuple[Endpoint | None, str | None]:
+    """Resolve ADB, pick a device, walk folders. None endpoint means user went back."""
+    try:
+        adb = resolve_adb_path()
+    except FileNotFoundError as exc:
+        ui.error(str(exc))
+        return Endpoint(kind="mtp", path=""), None
+
+    try:
+        output = subprocess.check_output([adb, "devices", "-l"], encoding="utf-8", errors="replace")
+    except (subprocess.CalledProcessError, OSError) as exc:
+        ui.error(f"Error listing devices: {exc}")
+        return Endpoint(kind="mtp", path=""), adb
+
+    devices = parse_devices(output)
+    if not devices:
+        ui.warn("No devices found. Please connect a device and try again.")
+        return Endpoint(kind="mtp", path=""), adb
+
+    serial = select_device(devices, choose=ui.ask)
+    if serial is None:
+        return None, adb
+    path = traverse_mtp_directories(adb, serial, current_path=start_path or MTP_ROOT)
+    if path is None:
+        return None, adb
+    return Endpoint(kind="mtp", path=path, device=serial), adb
+
+
+def prompt_kind(label: str, ask=ui.ask, allow_back: bool = False) -> str | None:
+    """Prompt for source/dest kind. Accepts 1/2 or mtp/local. None if back."""
+    options = [("1", "Phone (ADB)"), ("2", "This PC")]
+    if allow_back:
+        options.append(("b", "Back"))
+    while True:
+        ui.menu(f"Select {label}", options)
+        raw = ask("Choice: ")
+        if allow_back and raw.strip().lower() == "b":
+            return None
+        try:
+            if raw.strip() == "1":
+                return "mtp"
+            if raw.strip() == "2":
+                return "local"
+            return parse_kind(raw)
+        except ValueError:
+            ui.warn("Enter 1 or 2" + (", or b." if allow_back else "."))
+
+
+def _prompt_endpoint(
+    label: str,
+    allow_back: bool = False,
+    start_mtp: str = MTP_ROOT,
+) -> tuple[Endpoint | None, str | None]:
+    while True:
+        kind = prompt_kind(label, allow_back=allow_back)
+        if kind is None:
+            return None, None
+        if kind == "mtp":
+            endpoint, adb = _prompt_mtp_endpoint(start_path=start_mtp)
+            if endpoint is None:
+                continue
+            return endpoint, adb
+        path = prompt_local_directory(label)
+        if path is None:
+            continue
+        return Endpoint(kind="local", path=path), None
+
+
+def list_child_directory_names(source: Endpoint, rel: str, adb: str | None) -> list[str] | None:
+    if source.kind == "local":
+        path = os.path.join(source.path, *rel.split("/")) if rel else source.path
+        if not os.path.isdir(path):
+            return None
+        names = []
+        for name in sorted(os.listdir(path), key=str.lower):
+            if os.path.isdir(os.path.join(path, name)):
+                names.append(name)
+        return names
+    folder = join_mtp_path(source.path, rel) if rel else source.path
+    listing = _mtp_listing(adb, source.device, folder)
+    if listing is None:
+        return None
+    return listing[0]
+
+
+def parse_ignore_choice(text: str) -> tuple[str, int | None]:
+    raw = text.strip().lower()
+    if raw in ("0", "done"):
+        return "done", None
+    if raw in ("b", ".."):
+        return "back", None
+    if raw in ("i", "s"):
+        return "toggle_current", None
+    if raw[:1] in ("i", "s") and raw[1:].strip().isdigit():
+        return "toggle", int(raw[1:].strip())
+    if raw.isdigit():
+        return "open", int(raw)
+    return "unknown", None
+
+
+def prompt_ignore_mode(ask=ui.ask) -> str:
+    ui.menu(
+        "This source",
+        [("1", "Skip some folders"), ("2", "Copy everything"), ("b", "Back")],
+    )
+    while True:
+        answer = ask("Choice: ").strip().lower()
+        if answer in ("1", "i"):
+            return "ignore"
+        if answer in ("2", "all"):
+            return "all"
+        if answer == "b":
+            return "back"
+        ui.warn("Enter 1, 2, or b.")
+
+
+def prompt_skip_folder_action(name: str, skipped: bool, ask=ui.ask) -> str:
+    ui.skip_folder_action(name, skipped)
+    while True:
+        answer = ask("Choice: ").strip().lower()
+        if answer in ("1", "open", "o"):
+            return "open"
+        if answer in ("2", "s", "skip", "unskip"):
+            return "unskip" if skipped else "skip"
+        if answer == "b":
+            return "back"
+        ui.warn("Enter 1, 2, or b.")
+
+
+def _toggle_ignore(ignored: set[str], rel: str) -> set[str]:
+    if rel in ignored:
+        ignored.discard(rel)
+    elif is_ignored(rel, list(ignored)):
+        ui.warn("A parent folder is already skipped.")
+    else:
+        ignored.add(rel)
+        ignored = set(prune_ignore_prefixes(list(ignored)))
+    return ignored
+
+
+def prompt_ignore_folders(source: Endpoint, adb: str | None, ask=ui.ask) -> list[str] | None:
+    ignored: set[str] = set()
+    current = ""
+    while True:
+        dirs = list_child_directory_names(source, current, adb)
+        if dirs is None:
+            ui.warn("Could not list folders.")
+            if not current:
+                return None
+            current = join_relpath("", "/".join(current.split("/")[:-1])) if "/" in current else ""
+            continue
+        labels = {name for name in dirs if is_ignored(join_relpath(current, name), list(ignored))}
+        display = source.path if not current else (
+            os.path.join(source.path, *current.split("/")) if source.kind == "local"
+            else join_mtp_path(source.path, current)
+        )
+        ui.ignore_listing(display, dirs, labels, at_root=not current, dir_sizes=child_folder_sizes(source, current, dirs, adb))
+        action, number = parse_ignore_choice(ask("Choice: "))
+        if action == "done":
+            return prune_ignore_prefixes(list(ignored))
+        if action == "back":
+            if not current:
+                return None
+            current = "/".join(current.split("/")[:-1])
+            continue
+        if action == "toggle_current":
+            if not current:
+                ui.warn("Pick a numbered folder first, then choose Skip.")
+                continue
+            already = current in ignored
+            ignored = _toggle_ignore(ignored, current)
+            if not already and current in ignored:
+                current = "/".join(current.split("/")[:-1])
+            continue
+        if action == "toggle" and number is not None:
+            if 1 <= number <= len(dirs):
+                ignored = _toggle_ignore(ignored, join_relpath(current, dirs[number - 1]))
+            else:
+                ui.warn("Enter a folder number from the list.")
+            continue
+        if action == "open" and number is not None:
+            if not (1 <= number <= len(dirs)):
+                ui.warn("Enter a folder number from the list.")
+                continue
+            name = dirs[number - 1]
+            rel = join_relpath(current, name)
+            skipped = is_ignored(rel, list(ignored))
+            next_action = prompt_skip_folder_action(name, skipped, ask=ask)
+            if next_action == "open":
+                current = rel
+            elif next_action in ("skip", "unskip"):
+                ignored = _toggle_ignore(ignored, rel)
+            continue
+        ui.warn("Type a folder number, 0 when finished, or b to go back.")
+
+
+def wrapped_dest(dest: Endpoint, prefix: str) -> Endpoint:
+    """Dest path as shown in recap, including the wrap folder when used."""
+    if not prefix:
+        return dest
+    if dest.kind == "local":
+        return Endpoint("local", os.path.join(dest.path, prefix), dest.device)
+    return Endpoint("mtp", join_mtp_path(dest.path, prefix), dest.device)
+
+
+def prompt_reuse_dest(last_dest: Endpoint, ask=ui.ask) -> str:
+    """Second+ attempt: keep the previous dest or pick a new one."""
+    ui.menu(
+        "Destination",
+        [
+            ("1", f"Same as last — {ui.format_endpoint(last_dest)}"),
+            ("2", "Choose new…"),
+            ("b", "Back"),
+        ],
+    )
+    while True:
+        answer = ask("Choice: ").strip().lower()
+        if answer in ("1", "same", "y", "yes"):
+            return "same"
+        if answer in ("2", "new", "n", "no"):
+            return "new"
+        if answer == "b":
+            return "back"
+        ui.warn("Enter 1, 2, or b.")
+
+
+def prompt_next(ask=ui.ask) -> str:
+    """After a copy: another folder or quit."""
+    ui.menu(
+        "Next",
+        [
+            ("1", "Copy another folder"),
+            ("2", "Quit"),
+        ],
+    )
+    while True:
+        answer = ask("Choice: ").strip().lower()
+        if answer in ("1", "again", "y", "yes"):
+            return "again"
+        if answer in ("2", "3", "q", "quit"):
+            return "quit"
+        ui.warn("Enter 1 or 2.")
+
+
+def confirm_copy(
+    source: Endpoint,
+    dest: Endpoint,
+    ask=ui.ask,
+    ignored: list[str] | None = None,
+    stats: dict | None = None,
+) -> str:
+    ui.recap(source, dest, ignored=ignored, stats=stats)
+    ui.menu("Then", [("1", "Start copy"), ("2", "Cancel"), ("b", "Back")])
+    while True:
+        answer = ask("Choice: ").strip().lower()
+        if answer in ("1", "c", "confirm", "y", "yes"):
+            return "start"
+        if answer in ("2", "n", "no"):
+            return "cancel"
+        if answer == "b":
+            return "back"
+        ui.warn("Enter 1, 2, or b.")
+
+
+def main() -> None:
+    run_id = datetime.now().strftime("%d %B %Y - %H:%M:%S")
+    ui.header("FileSync", run_id)
+    ui.hint("Copy files phone ↔ PC and keep original dates.")
+
+    last_dest: Endpoint | None = None
+    last_dest_adb: str | None = None
+    last_mtp_source = MTP_ROOT
+    last_mtp_dest = MTP_ROOT
+
+    while True:
+        source, source_adb = _prompt_endpoint("source", start_mtp=last_mtp_source)
+        if source is None or not source.path:
+            ui.warn("Invalid directories selected, please try again.")
+            continue
+        ui.info(f"Source: {ui.format_endpoint(source)}")
+        if source.kind == "mtp":
+            last_mtp_source = source.path
+
+        ignore_mode = prompt_ignore_mode()
+        if ignore_mode == "back":
+            continue
+        ignore_prefixes: list[str] = []
+        if ignore_mode == "ignore":
+            chosen = prompt_ignore_folders(source, source_adb)
+            if chosen is None:
+                continue
+            ignore_prefixes = chosen
+
+        dest: Endpoint | None
+        dest_adb: str | None
+        if last_dest and last_dest.path:
+            reuse = prompt_reuse_dest(last_dest)
+            if reuse == "back":
+                continue
+            if reuse == "same":
+                dest, dest_adb = last_dest, last_dest_adb
+                ui.info(f"Dest:   {ui.format_endpoint(dest)}")
+            else:
+                dest, dest_adb = _prompt_endpoint(
+                    "destination",
+                    allow_back=True,
+                    start_mtp=last_mtp_dest,
+                )
+                if dest is None:
+                    continue
+                ui.info(f"Dest:   {ui.format_endpoint(dest) if dest.path else '(none)'}")
+        else:
+            dest, dest_adb = _prompt_endpoint(
+                "destination",
+                allow_back=True,
+                start_mtp=last_mtp_dest,
+            )
+            if dest is None:
+                continue
+            ui.info(f"Dest:   {ui.format_endpoint(dest) if dest.path else '(none)'}")
+
+        if not dest or not dest.path:
+            ui.warn("Invalid directories selected, please try again.")
+            continue
+        last_dest = dest
+        last_dest_adb = dest_adb
+        if dest.kind == "mtp":
+            last_mtp_dest = dest.path
+
+        prefix = dest_prefix_for(source)
+        if source.kind == "local" and dest.kind == "mtp" and load_manifest(source.path) is None:
+            ui.warn(
+                "No .filesync-manifest.json in this PC folder. "
+                "Using Windows file dates as fallback."
+            )
+        adb = dest_adb or source_adb
+        if (source.kind == "mtp" or dest.kind == "mtp") and adb is None:
+            try:
+                adb = resolve_adb_path()
+            except FileNotFoundError as exc:
+                ui.error(str(exc))
+                continue
+        ui.hint("Counting files and size…")
+        stats = source_job_stats(
+            source, adb, ignore_prefixes, dest=dest, dest_prefix=prefix
+        )
+        decision = confirm_copy(
+            source,
+            wrapped_dest(dest, prefix),
+            ignored=ignore_prefixes,
+            stats=stats,
+        )
+        if decision == "back":
+            continue
+        if decision == "cancel":
+            ui.warn("Cancelled.")
+        else:
+            try:
+                counts = run_once(
+                    source,
+                    dest,
+                    adb,
+                    dest_prefix=prefix,
+                    ignore_prefixes=ignore_prefixes,
+                    planned=stats,
+                )
+                last_dest = dest
+                last_dest_adb = dest_adb
+            except Exception as exc:
+                ui.error(f"Error during sync: {exc}")
+                counts = {
+                    "copied": 0,
+                    "skipped": 0,
+                    "failed": 0,
+                    "ignored": 0,
+                    "copied_bytes": 0,
+                    "skipped_bytes": 0,
+                    "failed_bytes": 0,
+                    "stopped": False,
+                    "error": str(exc),
+                    "elapsed_seconds": 0.0,
+                }
+            ui.summary(counts)
+
+        action = prompt_next()
+        if action == "quit":
+            break
+
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        ui.warn("\nCancelled.")
