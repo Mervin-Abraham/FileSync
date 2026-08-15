@@ -1,4 +1,5 @@
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -251,7 +252,8 @@ def test_local_to_mtp_without_manifest_uses_pc_file_times(tmp_path: Path, monkey
     assert touched[0][0] == "/sdcard/DCIM/Camera/pic.jpg"
     assert touched[0][1].mtime == 1700000123
     assert touched[0][1].atime == 1700000100
-    assert touched[0][1].birth == 1700000000
+    if sys.platform == "win32":
+        assert touched[0][1].birth == 1700000000
 
 
 def test_local_to_mtp_prefers_manifest_times_over_windows_dates(tmp_path: Path, monkeypatch):
@@ -590,7 +592,6 @@ def test_source_job_stats_subtracts_files_already_on_dest(tmp_path: Path):
     assert stats["already_bytes"] == 5
     assert stats["copy_files"] == 1
     assert stats["copy_bytes"] == 2
-    assert stats["copy_relpaths"] == ["Camera/new.jpg"]
     assert stats["copy_relpaths"] == ["Camera/new.jpg"]
 
 

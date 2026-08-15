@@ -158,12 +158,9 @@ def test_parse_ignore_choice():
 
     assert parse_ignore_choice("0") == ("done", None)
     assert parse_ignore_choice("b") == ("back", None)
-    assert parse_ignore_choice("i") == ("toggle_current", None)
-    assert parse_ignore_choice("i2") == ("toggle", 2)
-    assert parse_ignore_choice("s2") == ("toggle", 2)
-    assert parse_ignore_choice("s 3") == ("toggle", 3)
     assert parse_ignore_choice("s") == ("toggle_current", None)
     assert parse_ignore_choice("1") == ("open", 1)
+    assert parse_ignore_choice("s1") == ("unknown", None)
 
 
 def test_prompt_ignore_mode():
@@ -181,17 +178,6 @@ def test_prompt_ignore_folders_toggle_and_done(tmp_path):
     (src / "Android").mkdir(parents=True)
     (src / "DCIM").mkdir()
     answers = iter(["1", "2", "0"])
-    result = prompt_ignore_folders(Endpoint("local", str(src)), None, ask=lambda _p: next(answers))
-    assert result == ["Android"]
-
-
-def test_prompt_ignore_folders_shortcut_s1(tmp_path):
-    from FileSync import Endpoint, prompt_ignore_folders
-
-    src = tmp_path / "src"
-    (src / "Android").mkdir(parents=True)
-    (src / "DCIM").mkdir()
-    answers = iter(["s1", "0"])
     result = prompt_ignore_folders(Endpoint("local", str(src)), None, ask=lambda _p: next(answers))
     assert result == ["Android"]
 

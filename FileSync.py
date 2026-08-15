@@ -333,10 +333,8 @@ def parse_ignore_choice(text: str) -> tuple[str, int | None]:
         return "done", None
     if raw in ("b", ".."):
         return "back", None
-    if raw in ("i", "s"):
+    if raw == "s":
         return "toggle_current", None
-    if raw[:1] in ("i", "s") and raw[1:].strip().isdigit():
-        return "toggle", int(raw[1:].strip())
     if raw.isdigit():
         return "open", int(raw)
     return "unknown", None
@@ -415,12 +413,6 @@ def prompt_ignore_folders(source: Endpoint, adb: str | None, ask=ui.ask) -> list
             ignored = _toggle_ignore(ignored, current)
             if not already and current in ignored:
                 current = "/".join(current.split("/")[:-1])
-            continue
-        if action == "toggle" and number is not None:
-            if 1 <= number <= len(dirs):
-                ignored = _toggle_ignore(ignored, join_relpath(current, dirs[number - 1]))
-            else:
-                ui.warn("Enter a folder number from the list.")
             continue
         if action == "open" and number is not None:
             if not (1 <= number <= len(dirs)):

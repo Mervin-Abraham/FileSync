@@ -226,24 +226,13 @@ def folder_listing(
     dirs: list[str],
     file_count: int,
     at_root: bool = False,
-    folder_bytes: int | None = None,
-    dir_sizes: dict[str, int] | None = None,
 ) -> None:
     back_label = "Back" if at_root else "Up one level"
     options = [("0", "Use this folder"), ("b", back_label)]
-    dir_sizes = dir_sizes or {}
-    options.extend(
-        (str(index), _folder_label(name, dir_sizes.get(name)))
-        for index, name in enumerate(dirs, 1)
-    )
+    options.extend((str(index), f"{name}/") for index, name in enumerate(dirs, 1))
     menu(f"Folder  {path}", options)
-    bits = []
     if file_count:
-        bits.append(f"{file_count:,} files here")
-    if folder_bytes:
-        bits.append(format_size(folder_bytes))
-    if bits:
-        hint(" · ".join(bits))
+        hint(f"{file_count:,} files here")
 
 
 def ignore_listing(
@@ -273,12 +262,6 @@ def skip_folder_action(name: str, skipped: bool) -> None:
         else "Skip this folder and everything in it"
     )
     menu(title, [("1", "Look inside"), ("2", skip_label), ("b", "Back")])
-
-
-def iter_files(relpaths: list[str]):
-    """Yield relative paths with a Rich progress bar when available."""
-    with sync_progress(relpaths) as progress:
-        yield from progress
 
 
 def sync_progress(relpaths: list[str], total_bytes: int = 0, copy_bytes: int = 0) -> "TransferDashboard":
@@ -349,10 +332,6 @@ class TransferDashboard:
     def record_fail(self, size: int = 0) -> None:
         self.done_files += 1
         self._refresh()
-
-    def advance(self, nbytes: int = 0) -> None:
-        """Compatibility for older callers: count a finished file."""
-        self.record_skip(nbytes)
 
     def _refresh(self) -> None:
         if self._live is not None:

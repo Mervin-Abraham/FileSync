@@ -11,11 +11,6 @@ def test_format_endpoint_phone():
     assert ui.format_endpoint(endpoint) == "Phone ABC123  /sdcard/DCIM/"
 
 
-def test_iter_files_yields_all_paths():
-    paths = ["a.jpg", "b/c.png"]
-    assert list(ui.iter_files(paths)) == paths
-
-
 def test_summary_and_recap_do_not_crash():
     ui.header("FileSync", "test")
     ui.menu("Select source", [("1", "Phone (ADB)"), ("2", "This PC")])
@@ -24,7 +19,7 @@ def test_summary_and_recap_do_not_crash():
     ui.summary({"copied": 0, "skipped": 0, "failed": 3})
     ui.folder_listing("/sdcard/", ["DCIM", "Download"], 4)
     ui.ignore_listing("/sdcard/", ["DCIM", "Android"], {"Android"}, at_root=True)
-    ui.folder_listing("/sdcard/DCIM/", ["Camera"], 12, folder_bytes=2487219, dir_sizes={"Camera": 2487219})
+    ui.folder_listing("/sdcard/DCIM/", ["Camera"], 12)
     ui.summary({"copied": 1, "skipped": 0, "failed": 0, "copied_bytes": 2487219, "skipped_bytes": 0})
     ui.skip_folder_action("DCIM", False)
     ui.skip_folder_action("Android", True)
